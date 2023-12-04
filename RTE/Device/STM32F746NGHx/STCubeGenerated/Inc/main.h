@@ -60,6 +60,9 @@ void MX_LTDC_Init(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define Usr_button_Pin GPIO_PIN_11
+#define Usr_button_GPIO_Port GPIOI
+#define Usr_button_EXTI_IRQn EXTI15_10_IRQn
 
 /* USER CODE BEGIN Private defines */
 extern void app_main (void *arg);

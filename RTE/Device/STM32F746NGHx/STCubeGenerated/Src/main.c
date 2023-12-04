@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,7 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define BUFFER_SIZE 16
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -61,6 +62,8 @@ ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecr
 
 ETH_TxPacketConfig TxConfig;
 
+ADC_HandleTypeDef hadc3;
+
 DMA2D_HandleTypeDef hdma2d;
 
 ETH_HandleTypeDef heth;
@@ -76,6 +79,11 @@ SDRAM_HandleTypeDef hsdram1;
 /* Private variables ---------------------------------------------------------*/
 uint8_t data_uart6;
 uint8_t data_uart1;
+bool pin = false;
+bool PinPrev = false;
+bool connected = false;
+char receivedBuffer[BUFFER_SIZE];
+int bufferIndex = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,6 +95,10 @@ static void MX_FMC_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_DMA2D_Init(void);
 static void MX_USART6_UART_Init(void);
+static void MX_ADC3_Init(void);
+void ConnectToLoraWan();
+void SendMessageToHuart(UART_HandleTypeDef *huart, char msg[]);
+void SendMessage(bool pressed, int32_t potValue);
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 extern void BSP_SDRAM_Init(void);
@@ -164,9 +176,10 @@ int main(void)
   MX_USART1_UART_Init();
   MX_DMA2D_Init();
   MX_USART6_UART_Init();
+  MX_ADC3_Init();
   /* USER CODE BEGIN 2 */
 	
-	//HAL_UART_Receive_IT(&huart1,&data_uart1,1);
+	HAL_UART_Receive_IT(&huart1,&data_uart1,1);
 	HAL_UART_Receive_IT(&huart6,&data_uart6,1);
 
 	
@@ -244,6 +257,58 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC3_Init(void)
+{
+
+  /* USER CODE BEGIN ADC3_Init 0 */
+
+  /* USER CODE END ADC3_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC3_Init 1 */
+
+  /* USER CODE END ADC3_Init 1 */
+
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  */
+  hadc3.Instance = ADC3;
+  hadc3.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc3.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc3.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc3.Init.ContinuousConvMode = DISABLE;
+  hadc3.Init.DiscontinuousConvMode = DISABLE;
+  hadc3.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc3.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc3.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc3.Init.NbrOfConversion = 1;
+  hadc3.Init.DMAContinuousRequests = DISABLE;
+  hadc3.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  if (HAL_ADC_Init(&hadc3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC3_Init 2 */
+
+  /* USER CODE END ADC3_Init 2 */
+
 }
 
 /**
@@ -539,6 +604,7 @@ static void MX_FMC_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 /* USER CODE BEGIN MX_GPIO_Init_1 */
 /* USER CODE END MX_GPIO_Init_1 */
 
@@ -555,27 +621,77 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
 
+  /*Configure GPIO pin : Usr_button_Pin */
+  GPIO_InitStruct.Pin = Usr_button_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(Usr_button_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{		
-	if(huart==&huart6)
-	{  	
-		huart1.Instance->TDR=data_uart6;
-		HAL_UART_Receive_IT(&huart6,&data_uart6,1);
-	}
-	
-/*	if(huart==&huart1)
-	{  	
-		huart6.Instance->TDR=data_uart1;
-		HAL_UART_Receive_IT(&huart1,&data_uart1,1);
-	}*/	
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart == &huart6) {
+        huart1.Instance->TDR = data_uart6;
+        HAL_UART_Receive_IT(&huart6,&data_uart6,1);
+    }
+    if (huart == &huart1) {
+        huart6.Instance->TDR = data_uart1;
+        HAL_UART_Receive_IT(&huart1,&data_uart1,1);
+    }
 }
 
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == Usr_button_Pin) {
+		if(!connected){
+			ConnectToLoraWan();
+			return;
+		}
+	  if (HAL_GPIO_ReadPin(Usr_button_GPIO_Port, Usr_button_Pin) == GPIO_PIN_SET)
+			pin = true;
+		else
+			pin = false;
+  } else {
+      __NOP();
+  }
+}
+
+void ConnectToLoraWan(){
+	//huart1.Instance->TDR = "connect To LoraWan";
+	char message[] = "ATE=1\r\nAT+NTYP=1\r\nAT+DR=3\r\nAT+RX2DR=3\r\nAT+DC=0\r\nAT+APPEUI=0000000000000000\r\nAT+AK=3A7A193146AB05E7DCC5C32428A6C144\r\nAT+JOIN=1\r\n";
+	SendMessageToHuart(&huart6, message);
+	connected = true;
+}
+
+void SendMessage(bool pressed, int32_t potValue) {
+    if (pressed){
+			char message[46];
+			sprintf(message, "AT+SEND=2,01%04x,1\r", potValue);
+			SendMessageToHuart(&huart6, message);
+		}
+    else{
+			char message[46];
+			sprintf(message, "AT+SEND=2,00%04x,1\r", potValue);
+			SendMessageToHuart(&huart6, message);
+		}
+		HAL_Delay(2000);
+}
+
+
+void SendMessageToHuart(UART_HandleTypeDef *huart, char msg[]){
+	for (int i = 0; i < strlen(msg); i++) {
+			while (!(huart->Instance->ISR & UART_FLAG_TXE)); // Wacht tot het transmit register leeg is
+			huart->Instance->TDR = msg[i];
+	}
+}
 
 /* USER CODE END 4 */
 

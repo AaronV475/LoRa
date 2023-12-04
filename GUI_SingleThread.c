@@ -35,14 +35,23 @@
 #include "GUI.h"
 #include "Dialog.h"
 #include "main.h"
-#include <stdio.h>
-#include <string.h>
+#include <stdbool.h>
+#include "Temp.h"
+#include "stdio.h"
 
-extern UART_HandleTypeDef huart6;
+#define ID_FRAMEWIN_0     (GUI_ID_USER + 0x00)
+#define ID_MULTIEDIT_0     (GUI_ID_USER + 0x01)
+#define ID_MULTIEDIT_1     (GUI_ID_USER + 0x02)
 
 extern WM_HWIN CreateMyDialog(void);
 extern int  GUI_VNC_X_StartServer(int, int);
+void SendMessage(bool pressed, int32_t potValue);
+extern bool pin;
+extern bool PinPrev;
+extern bool PinPrev;
 
+int32_t PotValue;
+char buf[32];
 #ifdef _RTE_
 #include "RTE_Components.h"             // Component selection
 #endif
@@ -78,14 +87,28 @@ __NO_RETURN static void GUIThread (void *argument) {
   GUI_Init();           /* Initialize the Graphics Component */
 
   GUI_VNC_X_StartServer(0,0);
-  CreateMyDialog();
-	
-	{
-		char cmd[] = "AT\rATE=1\rAT+VER\r";
-		HAL_UART_Transmit(&huart6,(uint8_t*)cmd,strlen(cmd),HAL_MAX_DELAY);
-	}
-		
+  WM_HWIN hWin = CreateMyDialog();
+	WM_HWIN hItemD = WM_GetDialogItem(hWin, ID_MULTIEDIT_0);
+	WM_HWIN hItemT = WM_GetDialogItem(hWin, ID_MULTIEDIT_1);
+
   while (1) {
+		if(pin)
+			MULTIEDIT_SetText(hItemD, "Ingedrukt");
+		else
+			MULTIEDIT_SetText(hItemD, " Niet ingedrukt");
+		
+		ReadPot(&PotValue);
+		sprintf(buf, "%02d", PotValue);
+		MULTIEDIT_SetText(hItemT, buf);
+		
+		if(pin && !PinPrev){
+			SendMessage(true, PotValue);
+			PinPrev = true;
+		}
+		else if(!pin && PinPrev){
+			SendMessage(false, PotValue);
+			PinPrev = false;
+		}
     
     /* All GUI related activities might only be called from here */
 
